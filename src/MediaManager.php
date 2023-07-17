@@ -4,10 +4,12 @@ namespace Encore\Admin\Media;
 
 use Encore\Admin\Exception\Handler;
 use Encore\Admin\Extension;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
-use League\Flysystem\Adapter\Local;
+use League\Flysystem\Local\LocalFilesystemAdapter;
 
 /**
  * Class MediaManager.
@@ -27,13 +29,6 @@ class MediaManager extends Extension
     protected $storage;
 
     /**
-     * List of allowed extensions.
-     *
-     * @var string
-     */
-    protected $allowed = [];
-
-    /**
      * @var array
      */
     protected $fileTypes = [
@@ -47,6 +42,13 @@ class MediaManager extends Extension
         'audio' => 'mp3|wav|flac|3pg|aa|aac|ape|au|m4a|mpc|ogg',
         'video' => 'mkv|rmvb|flv|mp4|avi|wmv|rm|asf|mpeg',
     ];
+
+    /**
+     * List of allowed extensions.
+     *
+     * @var string
+     */
+    protected $allowed = [];
 
     /**
      * MediaManager constructor.
@@ -70,12 +72,12 @@ class MediaManager extends Extension
 
         $this->storage = Storage::disk($disk);
 
-        if (!$this->storage->getDriver()->getAdapter() instanceof Local) {
+        if (!$this->storage->getAdapter() instanceof LocalFilesystemAdapter) {
             Handler::error('Error', '[laravel-admin-ext/media-manager] only works for local storage.');
         }
     }
 
-    public function ls()
+    public function ls($query = null)
     {
         if (!$this->exists()) {
             Handler::error('Error', "File or directory [$this->path] not exists");
@@ -83,15 +85,39 @@ class MediaManager extends Extension
             return [];
         }
 
-        $files = $this->storage->files($this->path);
+        $allFiles = $this->storage->files($this->path);
+        $paginator = $this->paginator($allFiles, $query);
 
         $directories = $this->storage->directories($this->path);
+        $files = $this->formatDirectories($directories)
+            ->merge($this->formatFiles($paginator->items()))
+            ->sort(function ($item) {
+                return $item['name'];
+            })->all();
 
-        return $this->formatDirectories($directories)
-                ->merge($this->formatFiles($files))
-                ->sort(function ($item) {
-                    return $item['name'];
-                })->all();
+        $return = [
+            'files' => $files,
+            'paginator' => $paginator
+        ];
+
+        return $return;
+    }
+
+    public function paginator(array $files, $query)
+    {
+        $perPage = 10;
+        $currentPage = LengthAwarePaginator::resolveCurrentPage();
+        $currentFiles = array_slice($files, ($currentPage - 1) * $perPage, $perPage);
+
+        $paginatedFiles = new LengthAwarePaginator(
+            $currentFiles,
+            count($files),
+            $perPage,
+            $currentPage,
+            ['path' => LengthAwarePaginator::resolveCurrentPath(), 'query' => $query]
+        );
+
+        return $paginatedFiles;
     }
 
     /**
@@ -103,11 +129,10 @@ class MediaManager extends Extension
      */
     protected function getFullPath($path)
     {
-        $fullPath = $this->storage->getDriver()->getAdapter()->applyPathPrefix($path);
+        $fullPath = $this->storage->path($path);
         if (strstr($fullPath, '..')) {
             throw new \Exception('Incorrect path');
         }
-
         return $fullPath;
     }
 
@@ -141,9 +166,9 @@ class MediaManager extends Extension
 
     public function move($new)
     {
-        $ext = pathinfo($new, PATHINFO_EXTENSION);
+        $ext = strtolower(pathinfo($new, PATHINFO_EXTENSION));
         if ($this->allowed && !in_array($ext, $this->allowed)) {
-            throw new \Exception('File extension '.$ext.' is not allowed');
+            throw new \Exception('File extension ' . $ext . ' is not allowed');
         }
 
         return $this->storage->move($this->path, $new);
@@ -158,7 +183,7 @@ class MediaManager extends Extension
     public function upload($files = [])
     {
         foreach ($files as $file) {
-            if ($this->allowed && !in_array($file->getClientOriginalExtension(), $this->allowed)) {
+            if ($this->allowed && !in_array(strtolower($file->getClientOriginalExtension()), $this->allowed)) {
                 throw new \Exception('File extension '.$file->getClientOriginalExtension().' is not allowed');
             }
 
@@ -266,7 +291,7 @@ class MediaManager extends Extension
         switch ($this->detectFileType($file)) {
             case 'image':
 
-                if ($this->storage->getDriver()->getConfig()->has('url')) {
+                if ($this->storage->getConfig()['url']) {
                     $url = $this->storage->url($file);
                     $preview = "<span class=\"file-icon has-img\"><img src=\"$url\" alt=\"Attachment\"></span>";
                 } else {
@@ -324,7 +349,7 @@ class MediaManager extends Extension
 
     public function getFilesize($file)
     {
-        $bytes = filesize($this->getFullPath($file));
+        $bytes = $this->storage->size($file);
 
         $units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
 
@@ -337,8 +362,7 @@ class MediaManager extends Extension
 
     public function getFileChangeTime($file)
     {
-        $time = filectime($this->getFullPath($file));
-
+        $time = $this->storage->lastModified($file);
         return date('Y-m-d H:i:s', $time);
     }
 }
