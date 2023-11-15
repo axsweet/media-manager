@@ -303,6 +303,9 @@ $(function () {
                         <a href="{{ route('media-index', ['path' => $url['path'], 'view' => 'list']) }}" class="btn btn-default"><i class="fa fa-th"></i></a>
                     </div>
 
+                    <div class="btn-group">
+                        <a href="{{ route('clearShowCache', ['path' => $url['path']]) }}" class="btn btn-default"><i class="fa fa-eraser"></i>Show Sync & Cache</a>
+                    </div>
                     {{--<form action="{{ $url['index'] }}" method="get" pjax-container>--}}
                     <div class="input-group input-group-sm pull-right goto-url" style="width: 250px;">
                         <input type="text" name="path" class="form-control pull-right" value="{{ '/'.trim($url['path'], '/') }}">

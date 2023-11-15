@@ -7,6 +7,7 @@ use Encore\Admin\Layout\Content;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Artisan;
 
 class MediaController extends Controller
 {
@@ -85,6 +86,16 @@ class MediaController extends Controller
         }
     }
 
+    public function clearShowCache()
+    {
+
+       Artisan::call('command:cdnnew');
+        $art = Artisan::output();
+
+
+        admin_success('Done. Cleared Cache and synced show.',$art);
+        return back();
+    }
     public function move(Request $request)
     {
         $path = $request->get('path');
